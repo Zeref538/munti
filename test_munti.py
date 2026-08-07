@@ -98,6 +98,29 @@ def test_no_pos_is_order_blind():
     print("  ok  ablation config is genuinely order-blind")
 
 
+def test_get_batch_alignment():
+    """The data path's one silent failure mode.
+
+    The model learns to predict token t+1 from token t, and that shift happens in
+    get_batch — not in the model. If it were off by one, training would optimize
+    a misaligned objective perfectly happily and every other test here would
+    still pass, because they build their own batches. Check it against a known
+    array where the value at each index is the index itself.
+    """
+    import numpy as np
+
+    from munti import data as D
+
+    data = np.arange(1000, dtype=np.uint16)
+    x, y = D.get_batch(data, batch_size=8, block_size=16)
+    assert x.shape == y.shape == (8, 16)
+    # y must be x shifted exactly one token left...
+    assert torch.equal(y[:, :-1], x[:, 1:]), "targets are not inputs shifted by one"
+    # ...and on this array the token at index i *is* i, so the next token is i+1.
+    assert torch.equal(y, x + 1), "off-by-one in the next-token shift"
+    print("  ok  get_batch targets are inputs shifted by exactly one")
+
+
 def test_overfit_batches():
     """THE GATE. Memorize 4 fixed batches; then reproduce them greedily."""
     c = cfg(block_size=32, n_layer=2, n_head=2, n_embd=128)
@@ -147,6 +170,7 @@ if __name__ == "__main__":
         test_causal_mask,
         test_fast_matches_manual,
         test_no_pos_is_order_blind,
+        test_get_batch_alignment,
         test_overfit_batches,
     ):
         print(f"- {fn.__name__}")
