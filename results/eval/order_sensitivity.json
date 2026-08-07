@@ -1,0 +1,16 @@
+{
+  "baseline": {
+    "params": 12292992,
+    "learned_pos": true,
+    "val": 1.4946,
+    "val_shuffled": 9.5179,
+    "delta": 8.0233
+  },
+  "nopos": {
+    "params": 12194688,
+    "learned_pos": false,
+    "val": 1.543,
+    "val_shuffled": 9.7286,
+    "delta": 8.1855
+  }
+}
