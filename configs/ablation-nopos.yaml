@@ -1,0 +1,27 @@
+# Ablation (PRD FR-9): identical to munti-12m except positional embeddings are
+# removed. Attention is order-blind on its own, so this model can see which
+# tokens came before but not in what order. Same seed, same steps -> the loss
+# gap and the sample quality gap are attributable to exactly one change.
+out_dir: out-nopos
+seed: 1337
+device: null
+
+model:
+  vocab_size: 4096
+  block_size: 256
+  n_layer: 6
+  n_head: 6
+  n_embd: 384
+  dropout: 0.0
+  bias: false
+  learned_pos: false # <-- the only difference
+  fast_attn: true
+
+batch_size: 64
+max_steps: 20000
+lr: 0.001
+warmup_steps: 200
+weight_decay: 0.1
+grad_clip: 1.0
+eval_every: 500
+log_every: 100

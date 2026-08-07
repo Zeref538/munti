@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Data + weights: regenerable or too big for git.
+data/*.bin
+data/*.arrow
+out*/
+*.pt
+.cache/
+
+# The tokenizer is regenerable (`python -m munti.data prepare`) and the dev-slice
+# one has the same vocab size as the real one, so committing it now just invites
+# a silent mismatch. Phase 2 force-adds the tokenizer from the actual run:
+#   git add -f data/tokenizer.json
+data/tokenizer.json
