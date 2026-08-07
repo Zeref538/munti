@@ -112,9 +112,13 @@ def train(config_path: str, resume: bool = False):
     # bf16 where available (no scaler needed, its range matches fp32); fp16 plus
     # a gradient scaler otherwise, because fp16's narrow range underflows small
     # gradients to zero without one.
+    # Check the compute capability directly, not is_bf16_supported(): that call
+    # counts *emulated* bf16 and returns True on cards with no bf16 hardware at
+    # all (it said True on a P100), which would pick a path that crawls. Real
+    # bf16 starts at Ampere, sm_80.
     amp_dtype = None
     if device.startswith("cuda"):
-        amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        amp_dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     scaler = torch.amp.GradScaler("cuda", enabled=amp_dtype is torch.float16)
 
     def autocast():
