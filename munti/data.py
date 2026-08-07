@@ -23,6 +23,7 @@ from . import tokenizer as tk
 DATASET = "roneneldan/TinyStories"
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DTYPE = np.uint16
+CHUNK = 50_000  # stories encoded per write
 
 
 def _load(split: str, limit: int | None):
@@ -51,13 +52,22 @@ def prepare(limit: int | None = None, vocab_size: int = 4096, tok_sample: int = 
 
     eos_id = tok.token_to_id(tk.EOS)
     for name, ds in (("train", train_ds), ("val", val_ds)):
-        ids: list[int] = []
-        for enc in tok.encode_batch_fast(ds["text"]):
-            ids.extend(enc.ids)
-            ids.append(eos_id)
-        arr = np.array(ids, dtype=DTYPE)
-        arr.tofile(DATA_DIR / f"{name}.bin")
-        print(f"{name}.bin: {len(arr):,} tokens")
+        # Encode and append in chunks. Accumulating the full corpus in a Python
+        # list first would be tens of GB of boxed ints for the real run (~470M
+        # tokens) and OOM the session — the array on disk is only ~1GB.
+        total = 0
+        with open(DATA_DIR / f"{name}.bin", "wb") as f:
+            for start in range(0, len(ds), CHUNK):
+                texts = ds[start : start + CHUNK]["text"]
+                ids: list[int] = []
+                for enc in tok.encode_batch_fast(texts):
+                    ids.extend(enc.ids)
+                    ids.append(eos_id)  # story boundary
+                np.array(ids, dtype=DTYPE).tofile(f)
+                total += len(ids)
+                if name == "train" and start and start % (CHUNK * 10) == 0:
+                    print(f"  {name}: {start:,}/{len(ds):,} stories, {total:,} tokens")
+        print(f"{name}.bin: {total:,} tokens")
 
 
 def load_split(split: str, data_dir: Path | str = DATA_DIR) -> np.ndarray:

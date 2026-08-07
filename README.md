@@ -59,6 +59,17 @@ python -m munti.sample --ckpt out-tiny/ckpt.pt --prompt "Once upon a time"
 `data/` is gitignored — regenerate it with `munti.data prepare`. Configs and
 seeds are committed, so a run reproduces.
 
+### The full run (free Kaggle T4)
+
+[notebooks/train_kaggle.ipynb](notebooks/train_kaggle.ipynb) drives it. Zip the
+repo → upload as a Kaggle Dataset named `munti` → attach it to a GPU notebook
+with internet on → Run All → *Save Version → Save & Run All*. If the 9h session
+limit kills the run, attach that notebook's output to a new one and it resumes
+at the exact step, optimizer state included.
+
+The notebook contains no logic — it imports this package, so what runs on the
+GPU is the code that passed the gate.
+
 ## The correctness gate
 
 The single most useful thing in this repo. Before spending GPU hours,

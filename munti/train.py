@@ -26,6 +26,7 @@ import argparse
 import csv
 import math
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 import torch
@@ -106,13 +107,24 @@ def train(config_path: str, resume: bool = False):
         log_path.write_text("step,train_loss,val_loss,lr\n")
     samples_path = out / "samples.md"
 
-    # bf16 on GPU: ~2x faster, and unlike fp16 its range matches fp32 so no
-    # gradient scaler is needed.
-    use_amp = device.startswith("cuda") and torch.cuda.is_bf16_supported()
-    autocast = (
-        torch.amp.autocast("cuda", dtype=torch.bfloat16) if use_amp
-        else torch.amp.autocast("cpu", enabled=False)
-    )
+    # Mixed precision. The free Kaggle GPU is a T4 (Turing), which has fp16
+    # tensor cores but *no* bf16 — so bf16 there silently costs us the speedup.
+    # bf16 where available (no scaler needed, its range matches fp32); fp16 plus
+    # a gradient scaler otherwise, because fp16's narrow range underflows small
+    # gradients to zero without one.
+    amp_dtype = None
+    if device.startswith("cuda"):
+        amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_dtype is torch.float16)
+
+    def autocast():
+        if amp_dtype is None:
+            return nullcontext()
+        return torch.amp.autocast("cuda", dtype=amp_dtype)
+
+    print(f"precision: {amp_dtype or 'fp32'}")
+    if resume and ckpt_path.exists() and "scaler" in ck:
+        scaler.load_state_dict(ck["scaler"])
 
     t0 = time.time()
     model.train()
@@ -121,25 +133,35 @@ def train(config_path: str, resume: bool = False):
             g["lr"] = lr_at(step, lr=cfg["lr"], warmup=cfg["warmup_steps"], total=total_steps)
 
         x, y = D.get_batch(train_data, bs, block, device)
-        with autocast:
+        with autocast():
             _, loss = model(x, y)
         opt.zero_grad(set_to_none=True)
-        loss.backward()
+        scaler.scale(loss).backward()
+        # Unscale before clipping, or we'd be clipping the scaled gradients and
+        # the 1.0 threshold would mean nothing.
+        scaler.unscale_(opt)
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.get("grad_clip", 1.0))
-        opt.step()
+        scaler.step(opt)
+        scaler.update()
 
         if step % cfg.get("log_every", 100) == 0:
             print(f"step {step:6d} | loss {loss.item():.4f} | {time.time() - t0:.0f}s")
 
         if (step > 0 and step % cfg["eval_every"] == 0) or step == total_steps - 1:
-            tr = estimate_loss(model, train_data, bs, block, device)
-            va = estimate_loss(model, val_data, bs, block, device)
+            with autocast():
+                tr = estimate_loss(model, train_data, bs, block, device)
+                va = estimate_loss(model, val_data, bs, block, device)
             lr_now = opt.param_groups[0]["lr"]
             print(f"  eval @ {step}: train {tr:.4f} val {va:.4f}")
             with log_path.open("a", newline="") as f:
                 csv.writer(f).writerow([step, f"{tr:.4f}", f"{va:.4f}", f"{lr_now:.2e}"])
 
-            torch.save(model.checkpoint(opt=opt.state_dict(), step=step, val_loss=va), ckpt_path)
+            torch.save(
+                model.checkpoint(
+                    opt=opt.state_dict(), scaler=scaler.state_dict(), step=step, val_loss=va
+                ),
+                ckpt_path,
+            )
 
             # Checkpoint-progression samples (PRD FR-10).
             try:
