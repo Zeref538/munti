@@ -3,12 +3,13 @@
 Drop into `Portfolio/src/data.js`, next to the two fine-tuning cards. Munti is
 the "from scratch" end of the LLM spectrum that complements them.
 
-**Before publishing:** the `images` paths below don't exist yet. Capture screens
-of the loss curve, a sample generation, the ablation comparison and the
-correctness gate output, save them as `Portfolio/public/projects/munti-*.jpg`, or
-trim the array to what you actually have. The `demo` link assumes a GitHub Pages
-case study like the sibling projects — either publish one or delete both `demo`
-lines.
+**Live case study:** https://zeref538.github.io/munti/ — published, matching the
+sibling projects' `demo` pattern. The `demo` link below works.
+
+**Still needed before publishing:** the `images` paths don't exist yet. Screenshot
+the live case study (hero with the token strip, the loss curve, the ablation
+section, the can't-do table), save as `Portfolio/public/projects/munti-*.jpg`, or
+trim the array to what you actually have.
 
 ```js
   {
@@ -32,7 +33,8 @@ lines.
     demoLabel: "case study",
     highlights: [
       "Wrote the transformer by hand — multi-head causal attention, pre-LN residual blocks, weight-tied embeddings — and proved it correct on CPU in under a minute before touching a GPU, by overfitting four fixed batches to loss 0.0000 with 100% greedy recall",
-      "Predicted that removing positional embeddings would produce word salad and was wrong — it cost 0.039 nats — so I measured why: shuffling tokens sends that model from 1.543 to 9.729, a larger collapse than the baseline's, proving causal masking already leaks position via prefix length",
+      "Predicted that removing positional embeddings would produce word salad and was wrong — it cost ~0.04 nats — so I measured why: shuffling tokens sends that model from 1.543 to 9.729, a larger collapse than the baseline's, proving causal masking already leaks position via prefix length",
+      "Replicated the ablation at a second seed rather than trusting one reading: the two baselines land 0.003 apart while the effect is ~0.04, so between-seed noise sits an order of magnitude below the result being claimed",
       "Honest can-do/can't-do grounded in real generations: it writes stories with consistent characters and dialogue, but answers \"What is the capital of France?\" with a story about Santa, and loses entity tracking even mid-success (\"He opened the box and found a box!\")",
     ],
   },

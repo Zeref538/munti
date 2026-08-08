@@ -14,7 +14,10 @@ point is demonstrated understanding of how a language model works, plus an
 honest account of what a model this small can and cannot do.
 
 **Status:** trained. 44.4 minutes on a free Kaggle T4, final val loss **1.505**.
-Full writeup: **[CASE_STUDY.md](CASE_STUDY.md)**.
+
+**→ [Read the case study](https://zeref538.github.io/munti/)** ·
+[markdown version](CASE_STUDY.md) ·
+[weights](https://github.com/Zeref538/munti/releases)
 
 > Once upon a time, there was a little girl named Lily. She loved playing with
 > her toys, especially her dolls. One day, Lily's friend Timmy came over to play.
