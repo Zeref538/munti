@@ -36,13 +36,23 @@ Full writeup: **[CASE_STUDY.md](CASE_STUDY.md)**.
 
 ### The ablation, and the part I got wrong
 
-Removing the learned positional embeddings cost only **0.039 nats** (val 1.5051 →
-1.5444) and the output stayed coherent — I had predicted word salad. Probing it
-showed why: shuffling the input tokens *destroys* the no-positions model
-(1.543 → 9.729, worse than the baseline's 1.495 → 9.518), so it is not order-blind
-at all. A causal decoder recovers position from prefix length, because token 5
-attends over 5 tokens and token 50 over 50. Full reasoning in the
-[case study](CASE_STUDY.md#5-the-ablation--where-i-was-wrong).
+Removing the learned positional embeddings cost only **~0.04 nats** and the output
+stayed coherent — I had predicted word salad. Probing it showed why: shuffling the
+input tokens *destroys* the no-positions model (1.543 → 9.729, worse than the
+baseline's 1.495 → 9.518), so it is not order-blind at all. A causal decoder
+recovers position from prefix length, because token 5 attends over 5 tokens and
+token 50 over 50.
+
+Replicated at a second seed, because one reading isn't a measurement:
+
+| seed | baseline | no positions | gap | spread |
+|---|---|---|---|---|
+| 1337 | 1.5038 | 1.5504 | +0.0467 | 0.037 – 0.063 |
+| 1338 | 1.5010 | 1.5409 | +0.0400 | 0.024 – 0.052 |
+
+The two baselines land **0.003** apart while the gap is **~0.04** — between-seed
+noise is an order of magnitude below the effect, so it's real but imprecise. Full
+reasoning in the [case study](CASE_STUDY.md#5-the-ablation--where-i-was-wrong).
 
 ## What's here
 

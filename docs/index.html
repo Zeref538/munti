@@ -1,0 +1,1166 @@
+<!doctype html>
+<html lang="en" data-view="plain">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Munti — A Tiny Language Model, Built From Parts</title>
+<meta name="description" content="Case study: building a 12.5M-parameter language model from scratch in pure PyTorch — the tokenizer, the transformer, the training loop — and proving it correct before spending a GPU hour.">
+<style>
+  /* ============================================================
+     MUNTI — visual identity
+     Monospace is the DISPLAY face here, not the code face: the
+     subject is tokens, so the page is typeset in the material it
+     describes. Body copy is humanist sans. No serif anywhere.
+
+     Hues carry meaning and nothing else:
+       tangerine = the model / the baseline run
+       jade      = the ablation (no positional embeddings)
+       indigo    = the signature: tokens, and anything interactive
+       plum      = failure, what it cannot do
+     ============================================================ */
+  :root {
+    color-scheme: light;
+    --paper:  #eeecf3;
+    --card:   #fbfafd;
+    --sunk:   #e4e1ec;
+    --ink:    #16131f;
+    --ink-2:  #453e56;
+    --ink-3:  #6e6681;
+    --rule:   #dcd8e6;
+    --rule-2: #c6c0d6;
+    --tangerine: #c2521b;
+    --jade:      #0b7355;
+    --indigo:    #4a3bc4;
+    --plum:      #93276e;
+    --good:      #1a6b45;
+    --track:     #ded9e9;
+    /* token-cell tints — the signature palette, used nowhere else */
+    --t1: #ffd9c2; --t2: #c9eedc; --t3: #dad6fa; --t4: #fbe6b8;
+    --t-ink: #2a2338;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --paper: #131019; --card: #1c1826; --sunk: #241f30;
+      --ink: #f3f1f8; --ink-2: #b7afc8; --ink-3: #857c99;
+      --rule: #2c2639; --rule-2: #3d3550;
+      --tangerine: #ff8348; --jade: #35c495; --indigo: #9e8fff;
+      --plum: #ff7acb; --good: #4fce8e; --track: #272134;
+      --t1: #5a3220; --t2: #144635; --t3: #302a5e; --t4: #4d3c17;
+      --t-ink: #f3f1f8;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #131019; --card: #1c1826; --sunk: #241f30;
+    --ink: #f3f1f8; --ink-2: #b7afc8; --ink-3: #857c99;
+    --rule: #2c2639; --rule-2: #3d3550;
+    --tangerine: #ff8348; --jade: #35c495; --indigo: #9e8fff;
+    --plum: #ff7acb; --good: #4fce8e; --track: #272134;
+    --t1: #5a3220; --t2: #144635; --t3: #302a5e; --t4: #4d3c17;
+    --t-ink: #f3f1f8;
+  }
+
+  :root {
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 16.5px; line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 790px; margin: 0 auto; padding: 0 26px; }
+  @media (max-width: 560px) { .wrap { padding: 0 17px; } }
+
+  a { color: var(--indigo); text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--indigo); outline-offset: 2px; border-radius: 3px;
+  }
+
+  /* ---------------- sticky bar ---------------- */
+  .bar {
+    position: sticky; top: 0; z-index: 40;
+    background: color-mix(in srgb, var(--paper) 86%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--rule);
+  }
+  .bar-in {
+    max-width: 790px; margin: 0 auto; padding: 10px 26px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  @media (max-width: 560px) { .bar-in { padding: 9px 17px; } }
+  .bar-id {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--ink-3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .bar-id b { color: var(--ink); font-weight: 600; }
+  .bar-tools { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+  .modesw {
+    display: inline-flex; align-items: center; gap: 2px;
+    background: var(--sunk); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 3px;
+  }
+  .modesw button {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .04em;
+    color: var(--ink-3); background: none; border: 0; cursor: pointer;
+    padding: 5px 10px; border-radius: 4px; white-space: nowrap;
+    transition: color .16s, background .16s;
+  }
+  .modesw button[aria-pressed="true"] {
+    background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.09);
+  }
+  .iconbtn {
+    width: 31px; height: 31px; border-radius: 6px; cursor: pointer;
+    background: var(--sunk); border: 1px solid var(--rule); color: var(--ink-2);
+    font-size: 14px; display: grid; place-items: center;
+  }
+
+  /* ---------------- type ---------------- */
+  h1, h2, h3 { font-family: var(--mono); font-weight: 600; letter-spacing: -.015em; }
+  h1 { font-size: clamp(27px, 5vw, 42px); line-height: 1.14; margin: 0 0 14px; }
+  h2 { font-size: clamp(20px, 3vw, 26px); line-height: 1.24; margin: 0 0 12px; }
+  h3 { font-size: 15.5px; margin: 26px 0 8px; letter-spacing: 0; }
+  p { margin: 0 0 15px; }
+  strong { font-weight: 650; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-3); margin: 0 0 9px;
+  }
+  .sub { font-size: 18px; color: var(--ink-2); margin-bottom: 22px; }
+  .hero { padding: 46px 0 30px; }
+  section { padding: 34px 0; border-top: 1px solid var(--rule); }
+
+  /* section index rendered AS a token cell — the page's structural motif */
+  .sec-n {
+    display: inline-block; font-family: var(--mono); font-size: 11px;
+    background: var(--t3); color: var(--t-ink); border-radius: 4px;
+    padding: 2px 7px; margin-right: 8px; letter-spacing: .04em;
+    border: 1px solid color-mix(in srgb, var(--indigo) 22%, transparent);
+  }
+
+  /* ---------------- the signature: token strip ---------------- */
+  .tokbox {
+    background: var(--card); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 16px; margin: 0 0 18px;
+  }
+  .tokhead {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .tokhead .lab {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+  .segsw { margin-left: auto; display: inline-flex; background: var(--sunk);
+           border: 1px solid var(--rule); border-radius: 6px; padding: 2px; gap: 2px; }
+  .segsw button {
+    font-family: var(--mono); font-size: 10.5px; color: var(--ink-3);
+    background: none; border: 0; cursor: pointer; padding: 4px 9px; border-radius: 4px;
+  }
+  .segsw button[aria-pressed="true"] { background: var(--card); color: var(--ink); }
+  .strip { display: flex; flex-wrap: wrap; gap: 3px; font-family: var(--mono); }
+  .cell {
+    font-size: 13.5px; padding: 4px 5px; border-radius: 4px;
+    background: var(--t3); color: var(--t-ink);
+    white-space: pre; animation: pop .22s ease both;
+  }
+  .cell.t1 { background: var(--t1); } .cell.t2 { background: var(--t2); }
+  .cell.t3 { background: var(--t3); } .cell.t4 { background: var(--t4); }
+  @keyframes pop { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+  .tokfoot {
+    margin-top: 12px; font-family: var(--mono); font-size: 12px; color: var(--ink-3);
+    display: flex; gap: 16px; flex-wrap: wrap;
+  }
+  .tokfoot b { color: var(--ink); font-weight: 600; }
+
+  /* ---------------- stats ---------------- */
+  .stats { display: grid; gap: 10px; margin: 20px 0 16px; }
+  .stats.four { grid-template-columns: repeat(4, 1fr); }
+  .stats.three { grid-template-columns: repeat(3, 1fr); }
+  .stats.two { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 620px) {
+    .stats.four { grid-template-columns: repeat(2, 1fr); }
+    .stats.three, .stats.two { grid-template-columns: 1fr 1fr; }
+  }
+  .stat {
+    background: var(--card); border: 1px solid var(--rule);
+    border-radius: 9px; padding: 12px 13px;
+    border-top: 2px solid var(--rule-2);
+  }
+  .stat .lab {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px;
+  }
+  .stat .n { font-family: var(--mono); font-size: 21px; font-weight: 600; line-height: 1.1; }
+  .stat .foot { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+  .stat.c-tan { border-top-color: var(--tangerine); } .stat.c-tan .n { color: var(--tangerine); }
+  .stat.c-jade { border-top-color: var(--jade); } .stat.c-jade .n { color: var(--jade); }
+  .stat.c-ind { border-top-color: var(--indigo); } .stat.c-ind .n { color: var(--indigo); }
+  .stat.c-plum { border-top-color: var(--plum); } .stat.c-plum .n { color: var(--plum); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+  .chip {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-2);
+    background: var(--sunk); border: 1px solid var(--rule);
+    padding: 3px 8px; border-radius: 4px;
+  }
+
+  /* ---------------- figures, notes, callouts ---------------- */
+  .fig {
+    background: var(--card); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 15px; margin: 16px 0;
+  }
+  .fig figcaption {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--ink-3); margin-bottom: 11px;
+  }
+  .note {
+    font-size: 14.5px; color: var(--ink-2);
+    border-left: 2px solid var(--rule-2); padding: 2px 0 2px 13px; margin: 14px 0 0;
+  }
+  .flag {
+    background: var(--sunk); border: 1px solid var(--rule);
+    border-left: 3px solid var(--plum); border-radius: 0 9px 9px 0;
+    padding: 14px 16px; margin: 18px 0;
+  }
+  .flag .fh {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .05em;
+    text-transform: uppercase; color: var(--plum); margin: 0 0 8px;
+  }
+  .flag p:last-child { margin-bottom: 0; }
+  .flag.ok { border-left-color: var(--good); }
+  .flag.ok .fh { color: var(--good); }
+
+  .quote {
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.6;
+    background: var(--sunk); border: 1px solid var(--rule);
+    border-radius: 8px; padding: 12px 14px; margin: 10px 0;
+    white-space: pre-wrap;
+  }
+  .qtag {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--ink-3); margin: 16px 0 5px;
+  }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+  th {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--ink-3); font-weight: 500;
+  }
+  td.num, th.num { text-align: right; font-family: var(--mono); }
+  .tscroll { overflow-x: auto; }
+
+  code {
+    font-family: var(--mono); font-size: .89em;
+    background: var(--sunk); padding: 1px 5px; border-radius: 4px;
+  }
+  pre {
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+    background: var(--sunk); border: 1px solid var(--rule);
+    border-radius: 8px; padding: 13px; overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
+
+  .legend { display: flex; gap: 15px; flex-wrap: wrap; font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); }
+  .legend i { display: inline-block; width: 11px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .ax { font-family: var(--mono); font-size: 10px; fill: var(--ink-3); }
+
+  [data-mode] { display: none; }
+  html[data-view="plain"] [data-mode="plain"],
+  html[data-view="expert"] [data-mode="expert"] { display: block; }
+  span[data-mode] { display: none; }
+  html[data-view="plain"] span[data-mode="plain"],
+  html[data-view="expert"] span[data-mode="expert"] { display: inline; }
+  tr[data-mode], section[data-mode] { }
+  html[data-view="plain"] section[data-mode="plain"],
+  html[data-view="expert"] section[data-mode="expert"] { display: block; }
+
+  footer {
+    border-top: 1px solid var(--rule); margin-top: 26px;
+    padding: 24px 0 46px; color: var(--ink-3); font-size: 14px;
+  }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+  .links a {
+    font-family: var(--mono); font-size: 12px; text-decoration: none;
+    background: var(--card); border: 1px solid var(--rule);
+    padding: 6px 11px; border-radius: 6px; color: var(--ink-2);
+  }
+  .links a:hover { border-color: var(--indigo); color: var(--indigo); }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="bar-in">
+    <div class="bar-id"><b>Munti</b> <span>/ case study</span></div>
+    <div class="bar-tools">
+      <div class="modesw" role="group" aria-label="Reading level">
+        <button type="button" id="m-plain" aria-pressed="true">Plain English</button>
+        <button type="button" id="m-expert" aria-pressed="false">Technical</button>
+      </div>
+      <button type="button" class="iconbtn" id="theme" aria-label="Switch colour theme">◐</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <header class="hero">
+    <p class="eyebrow">Case study · building a language model from scratch</p>
+
+    <div data-mode="plain">
+      <h1>I built a language model out of parts, to find out what one really is</h1>
+      <p class="sub">
+        Anyone can call an AI's API. That teaches you the API. So I wrote one from
+        the bottom instead — the piece that chops text up, the maths that decides
+        what word comes next, the loop that teaches it — and trained it until it
+        could write its own children's stories. It cost nothing and took 44 minutes.
+        It is also, cheerfully, useless at everything else, and I will show you that too.
+      </p>
+    </div>
+    <div data-mode="expert">
+      <h1>Munti: a 12.5M-parameter decoder-only transformer, written and trained from scratch</h1>
+      <p class="sub">
+        Byte-level BPE, causal multi-head attention, pre-LN residual blocks and a
+        training loop in pure PyTorch — no pretrained weights, no prebuilt GPT class.
+        Trained on TinyStories to val loss 1.505 in 44.4 minutes on one free T4,
+        with a CPU correctness gate that had to pass before any GPU time was spent.
+      </p>
+    </div>
+
+    <!-- SIGNATURE: the real tokenizer, on real text -->
+    <div class="tokbox">
+      <div class="tokhead">
+        <span class="lab">The model reads this sentence as</span>
+        <div class="segsw" role="group" aria-label="Segmentation">
+          <button type="button" id="s-tok" aria-pressed="true">Tokens</button>
+          <button type="button" id="s-chr" aria-pressed="false">Characters</button>
+        </div>
+      </div>
+      <div class="strip" id="strip"></div>
+      <div class="tokfoot">
+        <span><b id="k-count">13</b> <span id="k-unit">tokens</span></span>
+        <span>53 characters</span>
+        <span id="k-ratio"><b>4.08</b> characters per token</span>
+      </div>
+      <p class="note" style="margin-top:12px">
+        <span data-mode="plain">These are the actual pieces Munti's vocabulary breaks
+        text into — it learned them from the stories themselves. Notice the spaces sit
+        <em>inside</em> the pieces: <code> Once</code>, not <code>Once</code>. Switch to
+        characters to see why this matters — four times as many boxes, for the same sentence.</span>
+        <span data-mode="expert">Real output from the trained 4096-entry byte-level BPE
+        in <code>data/tokenizer.json</code>. Leading spaces are absorbed into the merge
+        (<code>add_prefix_space</code>), so a word is one token regardless of position.
+        Corpus-wide compression is 3.96 chars/token.</span>
+      </p>
+    </div>
+
+    <div class="stats four">
+      <div class="stat c-ind">
+        <div class="lab">Parameters</div>
+        <div class="n">12.5M</div>
+        <div class="foot">6 layers · 6 heads · 384 wide</div>
+      </div>
+      <div class="stat c-tan">
+        <div class="lab">Val loss</div>
+        <div class="n">1.505</div>
+        <div class="foot">perplexity 4.50</div>
+      </div>
+      <div class="stat">
+        <div class="lab">Training time</div>
+        <div class="n">44 min</div>
+        <div class="foot">one free Kaggle T4</div>
+      </div>
+      <div class="stat">
+        <div class="lab">Cost</div>
+        <div class="n">₱0</div>
+        <div class="foot">free tier only</div>
+      </div>
+    </div>
+
+    <div class="chips">
+      <span class="chip">Pure PyTorch</span>
+      <span class="chip">Byte-level BPE, 4096</span>
+      <span class="chip">TinyStories · 536M tokens</span>
+      <span class="chip">20k steps</span>
+      <span class="chip">1 ablation + seed replicate</span>
+      <span class="chip">No pretrained weights</span>
+    </div>
+  </header>
+
+  <!-- ========== 1 ========== -->
+  <section id="why">
+    <p class="eyebrow"><span class="sec-n">01</span> The point</p>
+    <h2 data-mode="plain">Using one teaches you nothing about what it is</h2>
+    <h2 data-mode="expert">Why from scratch, and what "from scratch" means here</h2>
+
+    <div data-mode="plain">
+      <p>
+        Most AI portfolios show someone calling an API or fine-tuning somebody else's
+        model. Both are real skills. Neither tells you whether the person knows what
+        is happening inside.
+      </p>
+      <p>
+        So the rule for this project was: if it does the actual work, I write it. The
+        thing that splits text into pieces, the maths that lets each word look at the
+        words before it, the loop that nudges millions of numbers toward being less
+        wrong — all of it, by hand, with comments explaining why.
+      </p>
+    </div>
+    <div data-mode="expert">
+      <p>
+        Fine-tuning demonstrates tooling fluency. It does not demonstrate that you can
+        derive the objective, wire causal attention correctly, or debug a training loop
+        that silently optimises the wrong thing.
+      </p>
+      <p>
+        Constraint: nothing that performs the core computation is imported. The
+        <code>tokenizers</code> library supplies the BPE merge algorithm, but the
+        vocabulary is trained here on TinyStories, never downloaded. No pretrained
+        weights, no <code>GPT2LMHeadModel</code>. nanoGPT was read as a reference and
+        reimplemented, not vendored.
+      </p>
+    </div>
+
+    <p class="note">
+      <span data-mode="plain">It is deliberately <em>tiny</em> — "munti" is Filipino for
+      tiny — so it trains on free hardware in under an hour. Small enough to finish;
+      big enough to work.</span>
+      <span data-mode="expert">Sized at 12.5M params to fit one free session with room
+      to spare, and to keep the whole pipeline language-agnostic for a planned Tagalog
+      re-run on the same codebase.</span>
+    </p>
+  </section>
+
+  <!-- ========== 2 ========== -->
+  <section id="how">
+    <p class="eyebrow"><span class="sec-n">02</span> The machine</p>
+    <h2 data-mode="plain">What the thing actually does</h2>
+    <h2 data-mode="expert">Architecture, and the three details that decide whether it trains</h2>
+
+    <p data-mode="plain">
+      A language model has exactly one job: given some words, put a probability on
+      every possible next word. Everything else — chat, summarising, writing code —
+      is that single operation run in a loop, feeding its own output back in.
+    </p>
+    <p data-mode="expert">
+      Decoder-only transformer. Token embeddings plus learned positional embeddings,
+      six pre-LN blocks, final layernorm, and a weight-tied projection back to vocab
+      logits. Cross-entropy against the sequence shifted by one.
+    </p>
+
+    <figure class="fig">
+      <figcaption>One block, twice per layer</figcaption>
+      <svg viewBox="0 0 700 168" role="img" aria-label="Diagram: a transformer block. The residual stream runs left to right; attention mixes information between tokens, then the MLP processes each token independently.">
+        <defs>
+          <marker id="ah" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g color="var(--rule-2)">
+          <line x1="18" y1="84" x2="676" y2="84" stroke="currentColor" stroke-width="2" marker-end="url(#ah)"/>
+        </g>
+        <text class="ax" x="18" y="74">residual stream</text>
+
+        <g>
+          <rect x="150" y="40" width="170" height="52" rx="8" fill="var(--t3)" stroke="var(--indigo)" stroke-width="1.2"/>
+          <text x="235" y="63" text-anchor="middle" font-family="var(--mono)" font-size="13" font-weight="600" fill="var(--t-ink)">causal attention</text>
+          <text x="235" y="80" text-anchor="middle" class="ax">moves info BETWEEN tokens</text>
+        </g>
+        <g>
+          <rect x="400" y="40" width="170" height="52" rx="8" fill="var(--t1)" stroke="var(--tangerine)" stroke-width="1.2"/>
+          <text x="485" y="63" text-anchor="middle" font-family="var(--mono)" font-size="13" font-weight="600" fill="var(--t-ink)">MLP</text>
+          <text x="485" y="80" text-anchor="middle" class="ax">each token, independently</text>
+        </g>
+
+        <path d="M235 92 L235 118 L120 118 L120 84" fill="none" stroke="var(--rule-2)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <path d="M485 92 L485 118 L370 118 L370 84" fill="none" stroke="var(--rule-2)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <text x="235" y="136" text-anchor="middle" class="ax">+ residual</text>
+        <text x="485" y="136" text-anchor="middle" class="ax">+ residual</text>
+        <text x="600" y="63" class="ax">×6 layers</text>
+      </svg>
+    </figure>
+
+    <div data-mode="plain">
+      <p>
+        <strong>Attention</strong> is the only place information moves between words.
+        Every word asks a question ("what am I looking for?"), every earlier word
+        advertises what it is, and the word takes a weighted blend of whatever
+        matched. <strong>The MLP</strong> is where each word privately thinks about
+        what it just gathered — no talking to neighbours at all.
+      </p>
+    </div>
+    <div data-mode="expert">
+      <p>
+        Each token projects to query, key and value; scores are
+        <code>QKᵀ/√d_head</code>, masked causally, softmaxed, and applied to V. Heads
+        are a reshape, so it is one batched matmul rather than a loop.
+      </p>
+    </div>
+
+    <h3>Three details that are not cosmetic</h3>
+    <div class="tscroll"><table>
+      <thead><tr><th>Detail</th><th>What breaks without it</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>1/√d_head</code> scaling</td>
+          <td>Dot products grow with dimension, softmax saturates, gradients vanish. One division decides whether training works at all.</td>
+        </tr>
+        <tr>
+          <td>Pre-LN, not post-LN</td>
+          <td>Post-LN puts a layernorm on the residual path. Pre-LN keeps it a clean identity route from input to loss, so deep stacks train without heroics.</td>
+        </tr>
+        <tr>
+          <td>The causal mask</td>
+          <td>If position <em>i</em> sees position <em>j &gt; i</em>, the model is reading the answer. Training loss looks <em>better</em>; generation is garbage. Nothing in the curve tells you.</td>
+        </tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ========== 3 ========== -->
+  <section id="gate">
+    <p class="eyebrow"><span class="sec-n">03</span> The decision that saved the project</p>
+    <h2 data-mode="plain">Prove it works before paying for it</h2>
+    <h2 data-mode="expert">A CPU correctness gate, run before any GPU time</h2>
+
+    <p data-mode="plain">
+      Here is the trap this kind of project dies in: you train for six hours, get
+      nonsense, and have no way to tell whether the code is broken or the model just
+      needs more training. That single question can eat days.
+    </p>
+    <p data-mode="expert">
+      The failure mode to design against is an unfalsifiable result: gibberish output
+      with no way to separate an implementation bug from undertraining. Everything
+      below runs on CPU in under a minute.
+    </p>
+
+    <div class="tscroll"><table>
+      <thead><tr><th>Check</th><th>What it catches</th></tr></thead>
+      <tbody>
+        <tr><td>Loss at init ≈ <code>ln(4096)</code> = 8.32</td><td>Dead head, mis-shaped output projection</td></tr>
+        <tr><td>Perturb token <em>t</em> → logits before <em>t</em> unchanged</td><td>Causal mask leakage</td></tr>
+        <tr><td>Fused attention == hand-written attention</td><td>A speed switch silently changing results</td></tr>
+        <tr><td>No-positions config is order-blind at position 0</td><td>An ablation that doesn't ablate</td></tr>
+        <tr><td><code>get_batch</code> targets == inputs shifted by one</td><td>Off-by-one training a misaligned objective</td></tr>
+        <tr><td><strong>Overfit 4 fixed batches</strong></td><td><strong>Everything else</strong></td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="flag ok">
+      <p class="fh">The gate that actually matters</p>
+      <p data-mode="plain">
+        A working model <em>must</em> be able to memorise four fixed examples perfectly.
+        If it can't, it is broken, and no amount of data will rescue it. Munti drove
+        the error to <strong>0.0000</strong> and then reproduced all four word-for-word
+        from a short prompt. Only then did it touch a GPU.
+      </p>
+      <p data-mode="expert">
+        Deliberate overfit to loss &lt; 0.05 with greedy recall of the memorised
+        sequences. Result: <strong>mean loss 0.0000, 100% greedy recall</strong>.
+        Memorisation alone is necessary but insufficient — the recall check is what
+        catches a sampling bug that training loss cannot see.
+      </p>
+    </div>
+
+    <p class="note">
+      <span data-mode="plain">The gate caught a bug in its own first version — my
+      "loss at the start" check was wrong, not the model. Because the output layer
+      reuses the input vocabulary table, asking the model to predict the word it was
+      just given is far too easy, and the number came out flattering. Worth finding
+      before it became a confusing result rather than a test failure.</span>
+      <span data-mode="expert">First version asserted against <code>targets=x</code>.
+      With weight tying, the residual stream still carries the input embedding, so
+      identity prediction is trivially easy: init loss read 4.14 against an expected
+      8.32. The test was wrong; independent targets fixed it.</span>
+    </p>
+  </section>
+
+  <!-- ========== 4 ========== -->
+  <section id="tokenizer">
+    <p class="eyebrow"><span class="sec-n">04</span> Vocabulary</p>
+    <h2 data-mode="plain">Why the pieces aren't letters</h2>
+    <h2 data-mode="expert">Byte-level BPE at 4096, trained on the corpus</h2>
+
+    <p data-mode="plain">
+      The simplest choice is one box per letter. It works, and it wastes the model's
+      attention: the model can only look at 256 boxes at a time, so letters would let
+      it see a quarter as much story. Learning common chunks — <code> the</code>,
+      <code> once</code>, <code> Lily</code> — buys four times the context for free.
+      That is what the toggle at the top of this page is showing you.
+    </p>
+    <p data-mode="expert">
+      Measured compression is <strong>3.96 chars/token</strong> corpus-wide. At a fixed
+      256-token window, char-level would quarter the effective context. The base
+      alphabet is the 256 byte values, so any UTF-8 string is representable and there
+      is no unknown token — which is what keeps the pipeline language-agnostic for a
+      later Tagalog corpus with no code changes.
+    </p>
+
+    <div class="stats three">
+      <div class="stat c-ind"><div class="lab">Vocabulary</div><div class="n">4,096</div><div class="foot">learned merges</div></div>
+      <div class="stat c-ind"><div class="lab">Compression</div><div class="n">3.96</div><div class="foot">chars per token</div></div>
+      <div class="stat c-ind"><div class="lab">Corpus</div><div class="n">536M</div><div class="foot">tokens, 2.1M stories</div></div>
+    </div>
+  </section>
+
+  <!-- ========== 5 ========== -->
+  <section id="training">
+    <p class="eyebrow"><span class="sec-n">05</span> Training</p>
+    <h2 data-mode="plain">44 minutes, and the unglamorous parts that made it survive</h2>
+    <h2 data-mode="expert">20k steps, and the schedule details that matter</h2>
+
+    <figure class="fig">
+      <figcaption>Validation loss · baseline vs. no positional embeddings</figcaption>
+      <div id="chart-loss"></div>
+      <div class="legend" style="margin-top:10px">
+        <span><i style="background:var(--tangerine)"></i>baseline</span>
+        <span><i style="background:var(--jade)"></i>no positional embeddings</span>
+        <span><i style="background:var(--rule-2)"></i>baseline, training loss</span>
+      </div>
+    </figure>
+
+    <p data-mode="plain">
+      Train and validation scores finished within 0.02 of each other, which means the
+      model never started memorising instead of learning — expected, since it saw only
+      about 60% of the stories once.
+    </p>
+    <p data-mode="expert">
+      Final: train 1.486 / val 1.505, no overfitting gap at ~0.6 epoch. The curve is
+      spike-free.
+    </p>
+
+    <h3>The boring parts are the ones that decide if a run finishes</h3>
+    <div class="tscroll"><table>
+      <thead><tr><th>Mechanism</th><th>Why it's there</th></tr></thead>
+      <tbody>
+        <tr><td>200-step warmup</td><td>Adam's variance estimates are garbage at step 0; a full-size step then can wreck the initialisation permanently.</td></tr>
+        <tr><td>Cosine decay to 10%</td><td>Lets the model settle into the minimum instead of bouncing around it.</td></tr>
+        <tr><td>Gradient clipping at 1.0</td><td>One bad batch is the usual cause of "loss went to NaN at hour three".</td></tr>
+        <tr><td>Exact checkpoint + resume</td><td>Free GPU sessions are killed at 9 hours. Optimizer state and step are saved, so a resume continues rather than restarts.</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ========== 6 ========== -->
+  <section id="learned">
+    <p class="eyebrow"><span class="sec-n">06</span> Progression</p>
+    <h2 data-mode="plain">Grammar arrives long before sense</h2>
+    <h2 data-mode="expert">The same prompt at three checkpoints</h2>
+
+    <p>
+      Identical prompt, identical sampling settings, three points in training. The
+      order in which capabilities appear is the most interesting thing the run produced.
+    </p>
+
+    <p class="qtag">Step 500 · val 2.64 — sentence shapes correct, meaning absent</p>
+    <div class="quote">Once upon a time, there was a little girl called Lucy. Lucy was very kind and liked to dance. One day, while she was walking in the forest, she saw a peel on the ground and asked it it might be mad.</div>
+
+    <p class="qtag">Step 5,000 · val 1.77 — coherent scenes, trailing off</p>
+    <div class="quote">One day, Lily's mommy asked her to clean her up before dinner. Lily didn't want to clean her room because she wanted to play with her dolls, but she didn't want to stop playing with them.</div>
+
+    <p class="qtag">Step 20,000 · val 1.51 — characters persist, dialogue works</p>
+    <div class="quote">Once upon a time, there was a little girl named Lily. She loved playing with her toys, especially her dolls. One day, Lily's friend Timmy came over to play.
+
+"Wow, your toys look so cool!" said Timmy.
+"Thank you!" said Lily.</div>
+
+    <p class="note">
+      <span data-mode="plain">Syntax first, semantics later. At step 500 it had already
+      learned what a sentence looks like — it just had nothing to say.</span>
+      <span data-mode="expert">Syntactic structure is acquired well before semantic
+      coherence; dialogue attribution and cross-paragraph entity persistence appear last.</span>
+    </p>
+  </section>
+
+  <!-- ========== 7 ========== -->
+  <section id="ablation">
+    <p class="eyebrow"><span class="sec-n">07</span> The ablation</p>
+    <h2 data-mode="plain">I predicted this one wrong, so I chased it down</h2>
+    <h2 data-mode="expert">Removing positional embeddings, and why the small gap is the real finding</h2>
+
+    <div data-mode="plain">
+      <p>
+        An ablation means removing exactly one part and measuring the damage. I removed
+        the component that tells the model <em>where</em> each word sits, because the
+        attention maths on its own has no idea about order — it's a weighted average,
+        and averages don't care what came first.
+      </p>
+      <p><strong>My prediction: fluent nonsense. Right words, scrambled order.</strong></p>
+    </div>
+    <div data-mode="expert">
+      <p>
+        <code>learned_pos: false</code>, same seed, same steps, same LR schedule, and
+        the same token stream — the ablation kernel mounts the baseline run's output so
+        the data is byte-identical rather than re-tokenized. One variable.
+      </p>
+      <p><strong>Predicted: severe degradation, attention being permutation-invariant.</strong></p>
+    </div>
+
+    <div class="stats two">
+      <div class="stat c-tan"><div class="lab">Baseline</div><div class="n">1.5051</div><div class="foot">with positional embeddings</div></div>
+      <div class="stat c-jade"><div class="lab">No positions</div><div class="n">1.5444</div><div class="foot">+0.039 — and still coherent</div></div>
+    </div>
+
+    <div class="quote">Tom found a shiny red box under the tree. He was very happy and said, "Wow, look at this box! It's so pretty!"</div>
+    <p class="note">Generated by the model with <em>no positional information at all</em>. That is not word salad.</p>
+
+    <div class="flag">
+      <p class="fh">Where I was wrong</p>
+      <p data-mode="plain">
+        My reasoning had a hole in it. Attention really is order-blind on its own — but
+        this model only ever looks <em>backwards</em>. The 5th word can see 5 words; the
+        50th can see 50. How much you can see is itself a clue about where you are, and
+        the model learned to read it.
+      </p>
+      <p data-mode="expert">
+        Causal masking leaks position. Prefix length varies monotonically with index, so
+        a decoder-only model can recover positional information without any explicit
+        encoding — the documented NoPE result (Haviv et al., 2022). It is specific to
+        causal models; a bidirectional encoder stripped of positions really would be helpless.
+      </p>
+    </div>
+
+    <h3>Testing it instead of asserting it</h3>
+    <p>
+      Two explanations fit a small gap: the model ignores order, or it found order
+      elsewhere. So: score both models on normal text, then on the same text with the
+      words shuffled. A model that ignores order barely notices.
+    </p>
+
+    <figure class="fig">
+      <figcaption>Loss on normal text vs. shuffled text</figcaption>
+      <div id="chart-order"></div>
+    </figure>
+
+    <p>
+      The no-positions model is <strong>more</strong> order-sensitive than the baseline,
+      not less. It is not order-blind in the slightest — it simply obtained the
+      information another way.
+    </p>
+
+    <div class="flag">
+      <p class="fh">And the number itself is softer than it looks</p>
+      <p data-mode="plain">
+        One more honesty check. That "+0.039" is a single reading, and readings wobble.
+        Across the last five measurements of the very same pair of runs, the gap ranges
+        from +0.037 to +0.063 — so quoting three decimal places implies a precision this
+        experiment doesn't have. The honest claim is <strong>"roughly 0.04–0.06"</strong>.
+      </p>
+      <p data-mode="expert">
+        Eval noise is non-trivial relative to the effect: the baseline's own val loss
+        moves ±0.013 between adjacent evals, and the measured gap spans +0.037 to +0.063
+        over the last five evals of one run pair. Reporting the final step alone
+        overstates precision.
+      </p>
+    </div>
+
+    <figure class="fig">
+      <figcaption>The measured gap · both seeds, last five evaluations each</figcaption>
+      <div id="chart-gap"></div>
+    </figure>
+
+    <h3>So I measured it twice</h3>
+    <p data-mode="plain">
+      I retrained both models from scratch with a different random starting point.
+      If the effect were a fluke of randomness, it would move around or vanish.
+    </p>
+    <p data-mode="expert">
+      Both arms rerun at <code>seed: 1338</code>, identical otherwise, on the same
+      token stream.
+    </p>
+
+    <div class="tscroll"><table>
+      <thead><tr><th>Seed</th><th class="num">Baseline</th><th class="num">No positions</th><th class="num">Gap</th><th>Spread</th></tr></thead>
+      <tbody>
+        <tr><td>1337</td><td class="num">1.5038</td><td class="num">1.5504</td><td class="num">+0.0467</td><td>0.037 – 0.063</td></tr>
+        <tr><td>1338</td><td class="num">1.5010</td><td class="num">1.5409</td><td class="num">+0.0400</td><td>0.024 – 0.052</td></tr>
+        <tr><td><strong>Pooled</strong></td><td class="num">—</td><td class="num">—</td><td class="num"><strong>+0.043</strong></td><td><strong>0.024 – 0.063</strong></td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="flag ok">
+      <p class="fh">The control that makes it believable</p>
+      <p data-mode="plain">
+        Look at the baseline column, not the gap. Two runs that differ only in
+        randomness landed <strong>0.003</strong> apart — while the difference they're
+        being used to measure is <strong>0.04</strong>, more than ten times larger.
+        That is what turns "a number I got once" into a real finding.
+      </p>
+      <p data-mode="expert">
+        Between-seed variation on the baseline is 0.0028, an order of magnitude below
+        the ~0.043 effect. The effect is real and reproducible; the imprecision is in
+        the estimate, not the sign. Honest statement: <strong>positional embeddings
+        are worth roughly 0.04 nats here</strong>.
+      </p>
+    </div>
+
+    <p class="note">
+      <span data-mode="plain">A sister project of mine exists largely because random
+      variation once faked a result. Publishing the first number without this check
+      would have repeated the exact mistake that project is about.</span>
+      <span data-mode="expert">Two seeds do not give a confidence interval, but they
+      do separate sign and rough magnitude from noise — which is the only claim made
+      here.</span>
+    </p>
+  </section>
+
+  <!-- ========== 8 ========== -->
+  <section id="limits">
+    <p class="eyebrow"><span class="sec-n">08</span> Honest limits</p>
+    <h2 data-mode="plain">What it cannot do, in its own words</h2>
+    <h2 data-mode="expert">Can-do / can't-do, grounded in real generations</h2>
+
+    <p data-mode="plain">
+      It writes children's stories. That is the entire list. Everything below is a real
+      answer from the finished model, not a strawman.
+    </p>
+    <p data-mode="expert">
+      All outputs at temperature 0.8, top-k 200, from the final checkpoint.
+    </p>
+
+    <h3>Can</h3>
+    <p>
+      Write grammatical multi-paragraph stories with a beginning, middle and end; keep
+      a character's name and pronouns consistent across paragraphs; produce dialogue
+      with correct attribution; continue an unseen prompt in style.
+    </p>
+
+    <h3>Cannot</h3>
+    <div class="tscroll"><table>
+      <thead><tr><th>Asked</th><th>Answered</th></tr></thead>
+      <tbody>
+        <tr><td>What is the capital of France?</td><td>Her Mom laughed and said "that's the container of Santa. He's coming to visit us!"</td></tr>
+        <tr><td>The mitochondria is</td><td>a friend for you. Come on, let's go and find the star in the dark room.</td></tr>
+        <tr><td><code>def fibonacci(n):</code></td><td>"Thank you for marrying me." Snow smiled and replied, "I am happy that you two are very tough."</td></tr>
+      </tbody>
+    </table></div>
+
+    <p>Entity tracking also fails <em>inside</em> its successful samples:</p>
+    <div class="quote">He opened the box and found a box!</div>
+    <div class="quote">The cat and the cat became friends and played together every day.</div>
+
+    <p class="note">
+      <span data-mode="plain">None of this is a defect. It read simple children's
+      stories and learned exactly that. A model this small, trained this briefly, on
+      one narrow subject, has no machinery for facts or arithmetic or code — and a
+      write-up that quoted only the good samples would be lying by omission.</span>
+      <span data-mode="expert">Not defects — an accurate reflection of the training
+      distribution. There is no mechanism for factual recall at this scale, corpus and
+      compute budget. Quoting failures verbatim is the point of the section.</span>
+    </p>
+  </section>
+
+  <!-- ========== 9 ========== -->
+  <section id="eng">
+    <p class="eyebrow"><span class="sec-n">09</span> Engineering notes</p>
+    <h2 data-mode="plain">Four things that reported success while handing me the wrong thing</h2>
+    <h2 data-mode="expert">Infrastructure failures, and where each is now asserted</h2>
+
+    <p>
+      Every failure in this project was infrastructure, not modelling — because the
+      gate meant no GPU time was ever spent debugging the model. All four of these
+      are now checked at startup, so none can cost more than about twelve seconds again.
+    </p>
+
+    <div class="tscroll"><table>
+      <thead><tr><th>Trap</th><th>Symptom</th><th>Fix</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Free GPU was a P100</td>
+          <td>sm_60 is unsupported by the installed PyTorch. Everything before training is CPU work, so the run looked healthy for ten minutes before it would have died.</td>
+          <td>Assert compute capability ≥ 7.0 in cell one; pin the T4</td>
+        </tr>
+        <tr>
+          <td><code>is_bf16_supported()</code></td>
+          <td>Returns <code>True</code> on hardware with no bf16 at all — it counts emulation</td>
+          <td>Gate on capability ≥ 8.0 instead</td>
+        </tr>
+        <tr>
+          <td>Dataset upload</td>
+          <td>Silently dropped every subdirectory, reporting success. The package simply wasn't there.</td>
+          <td>Archive flag on every upload, then verify the file list</td>
+        </tr>
+        <tr>
+          <td>Locating the repo</td>
+          <td>Each mounted run output contains a full copy of the repo, so "first match wins" picked a stale snapshot</td>
+          <td>Search the dataset first, fall back to anywhere</td>
+        </tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- ========== 10 ========== -->
+  <section id="end">
+    <p class="eyebrow"><span class="sec-n">10</span> What I'd keep</p>
+    <h2 data-mode="plain">Three things worth carrying forward</h2>
+    <h2 data-mode="expert">Transferable conclusions</h2>
+
+    <p>
+      <strong>Buy certainty before you buy compute.</strong> A one-minute CPU test that
+      must pass before any paid hardware runs turned every subsequent failure into a
+      twelve-second one.
+    </p>
+    <p>
+      <strong>Predict first, then measure, then publish both.</strong> The ablation is
+      the most interesting part of this project precisely because I was wrong about it.
+      Reporting the number without chasing the explanation would have shipped a true
+      figure with a false story attached.
+    </p>
+    <p>
+      <strong>Report ranges, not decimals you didn't earn.</strong> A single evaluation
+      is a reading, not a measurement.
+    </p>
+
+    <div class="links">
+      <a href="https://github.com/Zeref538/munti">Source on GitHub</a>
+      <a href="https://github.com/Zeref538/munti/blob/main/CASE_STUDY.md">Written case study</a>
+      <a href="https://github.com/Zeref538/munti/releases">Weights (47MB)</a>
+      <a href="https://github.com/Zeref538/munti/blob/main/test_munti.py">The correctness gate</a>
+      <a href="https://github.com/Zeref538/munti/blob/main/munti/model.py">model.py</a>
+    </div>
+
+    <pre><code>pip install -e .
+python test_munti.py                    # the gate — CPU, under a minute
+python -m munti.data prepare            # TinyStories → token streams
+python -m munti.train --config configs/munti-12m.yaml
+python -m munti.sample --ckpt out/ckpt.pt --prompt "Once upon a time"</code></pre>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <p style="font-family:var(--mono);font-size:12px">
+      Munti — Filipino for <em>tiny</em>. Built by John Andrei Martinez.
+      Python · PyTorch · HuggingFace tokenizers · Kaggle free tier · ₱0.
+    </p>
+    <p style="font-size:13px">
+      A learning artifact, not a product. Every number on this page comes from a
+      committed run in the repository.
+    </p>
+  </div>
+</footer>
+
+<script>
+"use strict";
+
+/* ---------- reading level + theme ---------- */
+const root = document.documentElement;
+function setView(v) {
+  root.dataset.view = v;
+  document.getElementById("m-plain").setAttribute("aria-pressed", String(v === "plain"));
+  document.getElementById("m-expert").setAttribute("aria-pressed", String(v === "expert"));
+  try { localStorage.setItem("munti-view", v); } catch (e) {}
+}
+document.getElementById("m-plain").onclick = () => setView("plain");
+document.getElementById("m-expert").onclick = () => setView("expert");
+try { const v = localStorage.getItem("munti-view"); if (v) setView(v); } catch (e) {}
+
+document.getElementById("theme").onclick = () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const cur = root.dataset.theme || (dark ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark";
+  root.dataset.theme = next;
+  try { localStorage.setItem("munti-theme", next); } catch (e) {}
+  drawAll();
+};
+try { const t = localStorage.getItem("munti-theme"); if (t) root.dataset.theme = t; } catch (e) {}
+
+/* ---------- signature: the token strip ----------
+   Real output from the trained 4096-entry byte-level BPE. */
+const TOKENS = [" Once"," upon"," a"," time",","," there"," was"," a"," little"," girl"," named"," Lily","."];
+const TEXT = "Once upon a time, there was a little girl named Lily.";
+const strip = document.getElementById("strip");
+
+function render(mode) {
+  const units = mode === "tok" ? TOKENS : Array.from(TEXT);
+  strip.innerHTML = "";
+  units.forEach((u, i) => {
+    const el = document.createElement("span");
+    el.className = "cell t" + ((i % 4) + 1);
+    // show the leading space as a visible dot so the merge is legible
+    el.textContent = u.replace(/^ /, "·");
+    el.style.animationDelay = Math.min(i * 12, 340) + "ms";
+    strip.appendChild(el);
+  });
+  document.getElementById("k-count").textContent = units.length;
+  document.getElementById("k-unit").textContent = mode === "tok" ? "tokens" : "characters";
+  document.getElementById("k-ratio").innerHTML = mode === "tok"
+    ? "<b>4.08</b> characters per token"
+    : "<b>4.08×</b> more boxes for the same sentence";
+  document.getElementById("s-tok").setAttribute("aria-pressed", String(mode === "tok"));
+  document.getElementById("s-chr").setAttribute("aria-pressed", String(mode !== "tok"));
+}
+document.getElementById("s-tok").onclick = () => render("tok");
+document.getElementById("s-chr").onclick = () => render("chr");
+render("tok");
+
+/* ---------- chart data: straight from the committed CSVs ---------- */
+const BASE = [[500,2.6424,2.6367],[1000,2.2356,2.2326],[1500,2.0796,2.0863],[2000,1.997,1.9909],[2500,1.9206,1.9349],[3000,1.8736,1.8942],[3500,1.853,1.8557],[4000,1.8213,1.8344],[4500,1.7963,1.8042],[5000,1.7765,1.7736],[5500,1.7513,1.7627],[6000,1.7314,1.7325],[6500,1.7223,1.7284],[7000,1.7064,1.7079],[7500,1.6928,1.6941],[8000,1.6786,1.6793],[8500,1.6596,1.6662],[9000,1.6456,1.6722],[9500,1.6459,1.6466],[10000,1.6295,1.6318],[10500,1.6203,1.6209],[11000,1.6064,1.6092],[11500,1.6008,1.6075],[12000,1.5738,1.598],[12500,1.5738,1.5913],[13000,1.5617,1.5756],[13500,1.5574,1.5729],[14000,1.5418,1.5622],[14500,1.5339,1.5508],[15000,1.5278,1.5417],[15500,1.5185,1.5294],[16000,1.5233,1.522],[16500,1.5169,1.5316],[17000,1.5126,1.525],[17500,1.5052,1.513],[18000,1.4893,1.5112],[18500,1.4857,1.4984],[19000,1.4881,1.5083],[19500,1.4778,1.4958],[19999,1.4858,1.5051]];
+const ABL = [[500,2.7793],[1000,2.3087],[1500,2.1413],[2000,2.0434],[2500,1.9763],[3000,1.9307],[3500,1.8838],[4000,1.8687],[4500,1.8446],[5000,1.816],[5500,1.7989],[6000,1.7918],[6500,1.7742],[7000,1.7518],[7500,1.7425],[8000,1.7147],[8500,1.7137],[9000,1.6999],[9500,1.6774],[10000,1.6818],[10500,1.6709],[11000,1.6642],[11500,1.6464],[12000,1.6433],[12500,1.6411],[13000,1.6321],[13500,1.6047],[14000,1.6099],[14500,1.6002],[15000,1.5797],[15500,1.5844],[16000,1.5789],[16500,1.5716],[17000,1.5657],[17500,1.5638],[18000,1.5526],[18500,1.5611],[19000,1.5448],[19500,1.5493],[19999,1.5444]];
+const GAPS = [[18000,0.0414],[18500,0.0627],[19000,0.0365],[19500,0.0535],[19999,0.0393]];
+const GAPS38 = [[18000,0.0450],[18500,0.0243],[19000,0.0433],[19500,0.0521],[19999,0.0352]];
+const ORDER = [
+  { name: "baseline",     normal: 1.4946, shuffled: 9.5179, hue: "var(--tangerine)" },
+  { name: "no positions", normal: 1.5430, shuffled: 9.7286, hue: "var(--jade)" }
+];
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const el = (n, a) => { const e = document.createElementNS(SVGNS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+
+function drawLoss() {
+  const host = document.getElementById("chart-loss");
+  host.innerHTML = "";
+  const W = 700, H = 260, L = 44, R = 12, T = 10, B = 30;
+  const xs = s => L + (s / 20000) * (W - L - R);
+  const lo = 1.44, hi = 2.85;
+  const ys = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "Validation loss falls from 2.64 to 1.505 over 20,000 steps. The no-positional-embeddings run tracks slightly above it throughout, ending at 1.544." });
+
+  [1.5, 1.8, 2.1, 2.4, 2.7].forEach(v => {
+    svg.appendChild(el("line", { x1: L, y1: ys(v), x2: W - R, y2: ys(v), stroke: "var(--rule)", "stroke-width": 1 }));
+    const t = el("text", { x: L - 7, y: ys(v) + 3.5, "text-anchor": "end", class: "ax" });
+    t.textContent = v.toFixed(1); svg.appendChild(t);
+  });
+  [0, 5000, 10000, 15000, 20000].forEach(s => {
+    const t = el("text", { x: xs(s), y: H - 10, "text-anchor": "middle", class: "ax" });
+    t.textContent = s === 0 ? "0" : (s / 1000) + "k"; svg.appendChild(t);
+  });
+
+  const path = (pts, col, w, dash) => {
+    const d = pts.map((p, i) => (i ? "L" : "M") + xs(p[0]).toFixed(1) + " " + ys(p[1]).toFixed(1)).join(" ");
+    const p = el("path", { d, fill: "none", stroke: col, "stroke-width": w, "stroke-linejoin": "round", "stroke-linecap": "round" });
+    if (dash) p.setAttribute("stroke-dasharray", dash);
+    svg.appendChild(p);
+    return p;
+  };
+  path(BASE.map(r => [r[0], r[1]]), "var(--rule-2)", 1.4, "3 3");
+  const pa = path(ABL, "var(--jade)", 2);
+  const pb = path(BASE.map(r => [r[0], r[2]]), "var(--tangerine)", 2.4);
+
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    [pa, pb].forEach((p, i) => {
+      const len = p.getTotalLength ? p.getTotalLength() : 0;
+      if (!len) return;
+      p.style.strokeDasharray = len; p.style.strokeDashoffset = len;
+      p.animate([{ strokeDashoffset: len }, { strokeDashoffset: 0 }],
+        { duration: 1100, delay: 120 + i * 90, easing: "cubic-bezier(.4,0,.2,1)", fill: "forwards" });
+    });
+  }
+
+  const mark = (x, y, col, label, dy) => {
+    svg.appendChild(el("circle", { cx: xs(x), cy: ys(y), r: 3.5, fill: col }));
+    const t = el("text", { x: xs(x) - 6, y: ys(y) + dy, "text-anchor": "end", class: "ax", fill: col });
+    t.textContent = label; svg.appendChild(t);
+  };
+  mark(19999, 1.5051, "var(--tangerine)", "1.505", -8);
+  mark(19999, 1.5444, "var(--jade)", "1.544", 14);
+
+  host.appendChild(svg);
+}
+
+function drawOrder() {
+  const host = document.getElementById("chart-order");
+  host.innerHTML = "";
+  const W = 700, H = 190, L = 108, R = 56, T = 14, B = 26;
+  const max = 10.2;
+  const xw = v => (v / max) * (W - L - R);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "On normal text the baseline scores 1.49 and the no-positions model 1.54. On shuffled text they rise to 9.52 and 9.73 — the no-positions model degrades more." });
+
+  let y = T;
+  ORDER.forEach(m => {
+    const lab = el("text", { x: L - 10, y: y + 22, "text-anchor": "end", class: "ax", fill: "var(--ink-2)" });
+    lab.textContent = m.name; svg.appendChild(lab);
+
+    [["normal", m.normal, 1], ["shuffled", m.shuffled, .34]].forEach((row, i) => {
+      const yy = y + i * 26;
+      svg.appendChild(el("rect", { x: L, y: yy, width: W - L - R, height: 17, rx: 4, fill: "var(--track)" }));
+      const w = xw(row[1]);
+      // Set the real width up front and animate a scaleX transform instead:
+      // animating the CSS `width` property needs units, and unitless numbers
+      // silently no-op, leaving an invisible bar.
+      const bar = el("rect", { x: L, y: yy, width: w, height: 17, rx: 4, fill: m.hue, opacity: row[2] });
+      svg.appendChild(bar);
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        bar.style.transformBox = "fill-box";
+        bar.style.transformOrigin = "left center";
+        bar.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }],
+          { duration: 800, delay: 150 + i * 120, easing: "cubic-bezier(.4,0,.2,1)", fill: "backwards" });
+      }
+      const t = el("text", { x: L + w + 8, y: yy + 13, class: "ax", fill: "var(--ink-2)" });
+      t.textContent = row[1].toFixed(2) + "  " + row[0]; svg.appendChild(t);
+    });
+    y += 74;
+  });
+
+  const t = el("text", { x: L, y: H - 6, class: "ax" });
+  t.textContent = "cross-entropy loss — higher is worse";
+  svg.appendChild(t);
+  host.appendChild(svg);
+}
+
+function drawGap() {
+  const host = document.getElementById("chart-gap");
+  host.innerHTML = "";
+  const W = 700, H = 160, L = 52, R = 60, T = 16, B = 30;
+  const lo = 0.02, hi = 0.075;
+  const ys = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const xs = i => L + (i / (GAPS.length - 1)) * (W - L - R);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img",
+    "aria-label": "The measured gap across five consecutive evaluations ranges from 0.037 to 0.063, with a mean near 0.047 — noise comparable to the effect." });
+
+  const all = GAPS.concat(GAPS38).map(g => g[1]);
+  const mean = all.reduce((a, v) => a + v, 0) / all.length;
+
+  // the full spread across BOTH seeds — the honest error bar
+  svg.appendChild(el("rect", { x: L, y: ys(Math.max(...all)), width: W - L - R,
+    height: ys(Math.min(...all)) - ys(Math.max(...all)), fill: "var(--jade)", opacity: .11, rx: 4 }));
+  svg.appendChild(el("line", { x1: L, y1: ys(mean), x2: W - R, y2: ys(mean),
+    stroke: "var(--jade)", "stroke-width": 1.5, "stroke-dasharray": "4 3" }));
+  const mt = el("text", { x: W - R + 8, y: ys(mean) + 4, class: "ax", fill: "var(--jade)" });
+  mt.textContent = "mean " + mean.toFixed(3); svg.appendChild(mt);
+
+  [0.03, 0.04, 0.05, 0.06, 0.07].forEach(v => {
+    const t = el("text", { x: L - 8, y: ys(v) + 3.5, "text-anchor": "end", class: "ax" });
+    t.textContent = v.toFixed(2); svg.appendChild(t);
+  });
+
+  // seed 1337 = filled, seed 1338 = hollow. Same effect, two independent draws.
+  GAPS.forEach((g, i) => {
+    svg.appendChild(el("circle", { cx: xs(i) - 5, cy: ys(g[1]), r: 5, fill: "var(--jade)" }));
+    const t = el("text", { x: xs(i), y: H - 10, "text-anchor": "middle", class: "ax" });
+    t.textContent = (g[0] / 1000).toFixed(1) + "k"; svg.appendChild(t);
+  });
+  GAPS38.forEach((g, i) => {
+    svg.appendChild(el("circle", { cx: xs(i) + 5, cy: ys(g[1]), r: 5, fill: "none",
+      stroke: "var(--jade)", "stroke-width": 1.8 }));
+  });
+
+  const cap = el("text", { x: L, y: T - 4, class: "ax" });
+  cap.textContent = "gap in nats · ● seed 1337  ○ seed 1338 — band is the full spread of both";
+  svg.appendChild(cap);
+  host.appendChild(svg);
+}
+
+function drawAll() { drawLoss(); drawOrder(); drawGap(); }
+drawAll();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawAll);
+</script>
+</body>
+</html>

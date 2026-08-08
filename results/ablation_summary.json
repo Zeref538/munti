@@ -1,0 +1,16 @@
+{
+  "seed1337": {
+    "baseline_mean": 1.5038,
+    "nopos_mean": 1.5504,
+    "gap_mean": 0.0467,
+    "gap_min": 0.0365,
+    "gap_max": 0.0627
+  },
+  "seed1338": {
+    "baseline_mean": 1.501,
+    "nopos_mean": 1.5409,
+    "gap_mean": 0.04,
+    "gap_min": 0.0243,
+    "gap_max": 0.0521
+  }
+}

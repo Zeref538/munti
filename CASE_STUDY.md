@@ -147,7 +147,8 @@ the model should know *which* words go together but not in what sequence.
 | baseline | 1.5051 | — |
 | no positional embeddings | 1.5444 | **+0.039** |
 
-0.039 nats. And the text stayed coherent:
+Roughly four hundredths of a nat — and, as the replicate below shows, even that
+figure is more precise than the experiment earns. The text stayed coherent:
 
 > Tom found a shiny red box under the tree. He was very happy and said, "Wow, look at this box! It's so pretty!"
 
@@ -188,9 +189,31 @@ A side note: shuffled loss of ~9.5 is *worse* than the 8.32 you'd get from
 predicting uniformly at random. The model doesn't degrade into uncertainty on
 scrambled text — it stays confident and is confidently wrong.
 
+### One number, measured twice
+
+A single evaluation is a reading, not a measurement. The gap swings between
++0.037 and +0.063 across the last five evals of the *same* run pair, so quoting
+"0.039" implies a precision this experiment doesn't have. I reran both arms at a
+second seed — identical but for `seed: 1338`, on the same token stream.
+
+| seed | baseline | no positions | gap (mean, last 5 evals) | spread |
+|---|---|---|---|---|
+| 1337 | 1.5038 | 1.5504 | +0.0467 | 0.037 – 0.063 |
+| 1338 | 1.5010 | 1.5409 | +0.0400 | 0.024 – 0.052 |
+| **pooled** | | | **+0.043** | **0.024 – 0.063** |
+
+The effect reproduces, and the control that makes it believable is the baseline
+column: two independent runs landed **0.003 apart**, while the gap they're
+measuring is **~0.04**. Between-seed noise is an order of magnitude smaller than
+the effect, so this is a real difference that is simply imprecise — not a mirage.
+
 **The real conclusion** is more useful than the one I expected: explicit
-positional embeddings are worth 0.039 nats here, because a causal decoder gets
-most of that information free from its own masking.
+positional embeddings are worth **roughly 0.04 nats** here, because a causal
+decoder gets most of that information free from its own masking.
+
+I ran this because a sibling project of mine exists largely to document seed
+noise faking a result. Publishing "0.039" without the replicate would have
+repeated the exact mistake that project is about.
 
 ## 6. Can do / can't do
 

@@ -16,3 +16,6 @@ out*/
 # a silent mismatch. Phase 2 force-adds the tokenizer from the actual run:
 #   git add -f data/tokenizer.json
 data/tokenizer.json
+
+# local screenshot scratch
+.playwright-mcp/
