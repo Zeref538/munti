@@ -79,7 +79,7 @@ Decoder-only transformer, pre-LN, weight-tied embeddings.
 | layers / heads / width | 6 / 6 / 384 |
 | context | 256 tokens |
 | vocab | 4096 (byte-level BPE) |
-| compression | 3.98 chars/token |
+| compression | 3.96 chars/token |
 
 Byte-level BPE over char-level because a char tokenizer needs ~4x more tokens
 per story — the same 256-token context would see a quarter as much text. The
@@ -102,14 +102,28 @@ seeds are committed, so a run reproduces.
 
 ### The full run (free Kaggle T4)
 
-[notebooks/train_kaggle.ipynb](notebooks/train_kaggle.ipynb) drives it. Zip the
-repo → upload as a Kaggle Dataset named `munti` → attach it to a GPU notebook
-with internet on → Run All → *Save Version → Save & Run All*. If the 9h session
-limit kills the run, attach that notebook's output to a new one and it resumes
-at the exact step, optimizer state included.
+[notebooks/train_kaggle.ipynb](notebooks/train_kaggle.ipynb) drives it — published
+at [kaggle.com/code/johnandreimartinez/munti-train](https://www.kaggle.com/code/johnandreimartinez/munti-train).
+
+Upload the repo as a Kaggle Dataset (any name of 6+ characters — the notebook
+finds the repo by looking for `pyproject.toml`), attach it to a notebook with
+**GPU T4** and **internet on**, then Run All → *Save Version → Save & Run All*.
+If the 9h session limit kills the run, attach that notebook's output to a new one
+and it resumes at the exact step, optimizer and scaler state included.
+
+Via the CLI, the archive flag is not optional — without it the upload silently
+drops every subdirectory and reports success:
+
+```bash
+kaggle datasets create -p <staged-repo> -r zip
+kaggle kernels push -p <kernel-dir> --accelerator NvidiaTeslaT4
+```
 
 The notebook contains no logic — it imports this package, so what runs on the
-GPU is the code that passed the gate.
+GPU is the code that passed the gate. Its first cell asserts the GPU is sm_70+,
+because Kaggle's default P100 is unsupported by the installed PyTorch and
+everything before training is CPU work, so a doomed run looks healthy for ten
+minutes.
 
 ## The correctness gate
 
@@ -120,7 +134,8 @@ The single most useful thing in this repo. Before spending GPU hours,
 - test_shapes_and_init_loss   init loss 4.875 (~ln(vocab) = 4.852)
 - test_causal_mask            no future leakage
 - test_fast_matches_manual    fused attention == reference implementation
-- test_no_pos_is_order_blind  the ablation config is genuinely order-blind
+- test_no_pos_is_order_blind  ablation config is permutation-invariant at position 0
+- test_get_batch_alignment    targets are inputs shifted by exactly one
 - test_overfit_batches        OVERFIT GATE: mean loss 0.0000, greedy recall 100.0%
 ```
 
@@ -128,7 +143,15 @@ The last one is the real test: deliberately memorize four fixed batches. If loss
 doesn't collapse to ~0 and the model can't parrot them back, something is
 miswired and no amount of training will fix it. The causal-mask test guards the
 nastiest silent bug in a transformer — a leaky mask makes training loss look
-*better* while generation stays gibberish.
+*better* while generation stays gibberish. `test_get_batch_alignment` covers the
+other silent one: every other test builds its own batches, so an off-by-one in
+the data path's next-token shift would train a misaligned objective with all
+tests green.
+
+Note the fourth test's name oversells it — it only checks permutation invariance
+at position 0, which is much weaker than the whole sequence being order-blind.
+Misreading it is exactly how I got the ablation prediction wrong; see the
+[case study](CASE_STUDY.md#5-the-ablation--where-i-was-wrong).
 
 ## Can do / can't do
 
