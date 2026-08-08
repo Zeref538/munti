@@ -1,11 +1,51 @@
-# Portfolio card — ready to paste
+# Munti — portfolio integration brief
 
-**This is not a markdown file to copy.** The block below is a JavaScript object.
-It goes into `Portfolio/src/data.js`, in the `projects` array, next to the two
-fine-tuning cards. Nothing here gets pasted as `.md`.
+*Paste this whole file into a session working in the `Portfolio` repo. It is
+self-contained: what the project is, the verified numbers, and the exact edits.*
 
-**Live case study:** https://zeref538.github.io/munti/ — published, matching the
-sibling projects' `demo` pattern. The `demo` link below works.
+## What Munti is
+
+A ~12.5M-parameter language model **built from scratch** in pure PyTorch — the
+byte-level BPE tokenizer, the causal multi-head attention, the training loop and
+the sampler are all hand-written. No pretrained weights, no ready-made GPT class.
+Trained on TinyStories on a free Kaggle T4. It writes coherent children's stories
+and can do nothing else, which the project states openly.
+
+It is the **from-scratch** end of the owner's LLM work, complementing the two
+existing fine-tuning cards (Refusal Calibration, Token-Optimization).
+
+| fact | value |
+|---|---|
+| params | 12,292,992 (6 layers, 6 heads, 384 wide, 256 context) |
+| tokenizer | byte-level BPE, 4096 vocab, 3.96 chars/token, trained on the corpus |
+| corpus | 2.1M TinyStories → ~536M tokens |
+| training | 20k steps × 64 × 256 (~0.6 epoch), **44.4 min**, one free T4, ₱0 |
+| result | train 1.486 / **val 1.505** (perplexity 4.50) |
+| ablation | no positional embeddings → **~0.04 nats** worse, replicated at 2 seeds |
+| honesty | can-do/can't-do quotes real failures, e.g. it answers "capital of France?" with a story about Santa |
+
+The three things that make it portfolio-worthy, in order:
+
+1. **A correctness gate before any GPU spend.** Six CPU tests, under a minute;
+   the key one deliberately overfits four fixed batches to loss 0.0000 with 100%
+   greedy recall. It means no GPU hour was ever spent debugging the model.
+2. **An ablation whose prediction was wrong, chased down rather than buried.**
+   Removing positional embeddings barely hurt. Two follow-ups explain it:
+   shuffling tokens destroys that model (so it isn't order-blind — a causal
+   decoder recovers position from prefix length), and a second seed reproduced
+   the gap while the two baselines landed 0.003 apart.
+3. **Honest limits quoted verbatim**, including failures inside its good samples.
+
+**Links:** repo https://github.com/Zeref538/munti · live case study
+https://zeref538.github.io/munti/ · weights on the GitHub releases page.
+
+---
+
+## What to paste where
+
+**This file is not what goes in the codebase.** The block below is a JavaScript
+object; it goes into `Portfolio/src/data.js`, in the `projects` array, next to
+the two fine-tuning cards.
 
 ## Two edits, not one
 
